@@ -417,6 +417,7 @@ svg{display:block;flex-shrink:0}
       <input type="file" id="s-map" accept="image/*" style="display:none" onchange="handleMapUpload(event)">
       <button class="bsm bsm-full" onclick="document.getElementById('s-map').click()">選擇圖片</button>
       <div id="map-status" style="font-size:11px;color:var(--text2);margin-top:4px"></div>
+      <button class="bsm bsm-full" style="margin-top:6px" onclick="reopenMapScale()">重新調整地圖大小</button>
     </div>
     <div class="fg">
       <label class="flbl">固定代購朋友</label>
@@ -540,16 +541,9 @@ async function initMapFromDB(){
   const url=URL.createObjectURL(blob);
   const img=new Image();
   img.onload=()=>{
-    let w=img.width,h=img.height;
-    const maxW=1800,maxH=2400;
-    if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
-    if(h>maxH){w=Math.round(w*maxH/h);h=maxH;}
-    canvas.width=w;canvas.height=h;
-    canvas.style.width=w+'px';canvas.style.height=h+'px';
-    ctx.drawImage(img,0,0,w,h);
-    mapImgData=ctx.getImageData(0,0,w,h);
-    mapHasImage=true;
-    defaultZoom();renderDots();
+    _pendingMapImg=img;
+    const scale=mapBaseScale||1;
+    applyMapImage(img,null,scale);
     document.getElementById('map-status').textContent='✅ 地圖已從上次自動載入';
     URL.revokeObjectURL(url);
   };
@@ -894,7 +888,7 @@ function drawMarkers(){
   if(mapHasImage&&mapImgData){ctx.putImageData(mapImgData,0,0);}
   else if(!mapHasImage){drawDemoMap();}
   const W=canvas.width,H=canvas.height;
-  const bW=Math.round(W/18),bH=Math.round(W/36);
+  const bW=72,bH=36;
   const maxFS=Math.max(9,Math.round(bH*0.62));
   S.booths.forEach(b=>{
     if(b.x==null)return;
@@ -934,7 +928,7 @@ function hitTest(cX,cY){
   const rect=canvas.getBoundingClientRect();
   const cx=(cX-rect.left)/rect.width*canvas.width;
   const cy=(cY-rect.top)/rect.height*canvas.height;
-  const bW=Math.round(canvas.width/18),bH=Math.round(canvas.width/36);
+  const bW=72,bH=36;
   return [...S.booths].reverse().find(b=>{
     if(b.x==null)return false;
     const bx=b.x/100*canvas.width,by=b.y/100*canvas.height;
@@ -947,7 +941,7 @@ function drawPinPrev(cX,cY){
   pinPrevX=(cX-rect.left)/rect.width;pinPrevY=(cY-rect.top)/rect.height;
   drawMarkers();
   const cx=pinPrevX*canvas.width,cy=pinPrevY*canvas.height;
-  const bW=Math.round(canvas.width/18),bH=Math.round(canvas.width/36);
+  const bW=72,bH=36;
   const b=S.booths.find(x=>x.id===pinId);const label=b?b.author.slice(0,4):'?';
   ctx.globalAlpha=0.92;ctx.fillStyle='#c084fc';
   ctx.beginPath();ctx.roundRect(cx-bW/2,cy-bH/2,bW,bH,3);ctx.fill();
@@ -1104,30 +1098,91 @@ function toggleSoldOutPopup(){
 function editPopup(){if(!activePopId)return;const id=activePopId;closePopup();setTimeout(()=>openEditBooth(id),60);}
 function pinPopup(){if(!activePopId)return;const id=activePopId;closePopup();setTimeout(()=>startPin(id),60);}
 
+// ═══════════════════
+// MAP SCALE SETTING
+// ═══════════════════
+let mapBaseScale=parseFloat(localStorage.getItem('mapBaseScale')||'1');
+let _pendingMapFile=null,_pendingMapImg=null;
+
 function handleMapUpload(e){
   const file=e.target.files[0];if(!file)return;
+  _pendingMapFile=file;
   const reader=new FileReader();
   reader.onload=ev=>{
     const img=new Image();
     img.onload=()=>{
-      let w=img.width,h=img.height;
-      const maxW=1800,maxH=2400;
-      if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
-      if(h>maxH){w=Math.round(w*maxH/h);h=maxH;}
-      canvas.width=w;canvas.height=h;
-      canvas.style.width=w+'px';canvas.style.height=h+'px';
-      ctx.drawImage(img,0,0,w,h);
-      mapImgData=ctx.getImageData(0,0,w,h);
-      mapHasImage=true;
-      defaultZoom();
-      document.getElementById('map-status').textContent='✅ '+file.name;
-      renderDots();
-      // Save original file blob to IndexedDB for persistence
-      saveMapToDB(file);
+      _pendingMapImg=img;
+      // open scale modal
+      const slider=document.getElementById('map-scale-slider');
+      slider.value=Math.round(mapBaseScale*10);
+      document.getElementById('scale-val').textContent=mapBaseScale.toFixed(1)+'×';
+      previewMapScale(slider.value);
+      document.getElementById('mov-mapscale').classList.add('open');
     };img.src=ev.target.result;
   };reader.readAsDataURL(file);
 }
 
+function previewMapScale(val){
+  const scale=val/10;
+  document.getElementById('scale-val').textContent=scale.toFixed(1)+'×';
+  const img=_pendingMapImg;if(!img)return;
+  const pc=document.getElementById('scale-preview-canvas');
+  const cont=pc.parentElement;
+  const cw=cont.offsetWidth||300,ch=cont.offsetHeight||160;
+  // draw scaled preview
+  let w=img.width,h=img.height;
+  const maxW=1800,maxH=2400;
+  if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
+  if(h>maxH){w=Math.round(w*maxH/h);h=maxH;}
+  const sw=Math.round(w*scale),sh=Math.round(h*scale);
+  pc.width=sw;pc.height=sh;
+  pc.style.width=sw+'px';pc.style.height=sh+'px';
+  const pctx=pc.getContext('2d');
+  pctx.drawImage(img,0,0,sw,sh);
+  // center preview
+  const tx=Math.max(0,(cw-sw)/2),ty=Math.max(0,(ch-sh)/2);
+  pc.style.transform=`translate(${tx}px,${ty}px)`;
+  if(sw>cw||sh>ch){
+    const fit=Math.min(cw/sw,ch/sh);
+    pc.style.transform=`translate(0,0) scale(${fit})`;
+    pc.style.transformOrigin='0 0';
+  }
+}
+
+function confirmMapScale(){
+  const scale=parseFloat(document.getElementById('map-scale-slider').value)/10;
+  mapBaseScale=scale;
+  localStorage.setItem('mapBaseScale',scale);
+  closeModal('mov-mapscale');
+  // now apply the map with the chosen scale
+  applyMapImage(_pendingMapImg,_pendingMapFile,scale);
+}
+
+function applyMapImage(img,file,scale){
+  let w=img.width,h=img.height;
+  const maxW=1800,maxH=2400;
+  if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
+  if(h>maxH){w=Math.round(w*maxH/h);h=maxH;}
+  const sw=Math.round(w*scale),sh=Math.round(h*scale);
+  canvas.width=sw;canvas.height=sh;
+  canvas.style.width=sw+'px';canvas.style.height=sh+'px';
+  ctx.drawImage(img,0,0,sw,sh);
+  mapImgData=ctx.getImageData(0,0,sw,sh);
+  mapHasImage=true;
+  defaultZoom();
+  if(file)document.getElementById('map-status').textContent='✅ '+file.name;
+  renderDots();
+  if(file)saveMapToDB(file);
+}
+
+function reopenMapScale(){
+  if(!_pendingMapImg){toast('請先上傳地圖');return;}
+  const slider=document.getElementById('map-scale-slider');
+  slider.value=Math.round(mapBaseScale*10);
+  document.getElementById('scale-val').textContent=mapBaseScale.toFixed(1)+'×';
+  previewMapScale(slider.value);
+  document.getElementById('mov-mapscale').classList.add('open');
+}
 // ═══════════════════
 // LIST
 // ═══════════════════
@@ -1716,7 +1771,32 @@ document.getElementById('ev-title').textContent=S.event.name;
 document.getElementById('ev-date').textContent=S.event.date.replace(/-/g,'.').slice(2);
 renderAll();
 //]]></script>
-<!-- TOAST at end of body for proper z-index stacking -->
+<!-- MAP SCALE MODAL -->
+<div class="mov" id="mov-mapscale">
+  <div class="modal" style="padding-bottom:24px">
+    <div class="mhandle"></div>
+    <div class="mtitle">調整地圖大小</div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:16px">調整地圖的基準顯示大小，讓格子更大更容易打點。確認後會固定，之後可以在設定裡重新調整。</p>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--text2)">地圖大小</span>
+      <span id="scale-val" style="font-family:var(--mono);font-size:13px;color:var(--accent2)">1.0×</span>
+    </div>
+    <input type="range" id="map-scale-slider" min="10" max="40" value="10" step="1"
+      style="width:100%;accent-color:var(--accent);margin-bottom:16px"
+      oninput="previewMapScale(this.value)">
+    <div style="display:flex;gap:8px;font-size:11px;color:var(--text2);margin-bottom:20px">
+      <span>1×（原始）</span><span style="margin-left:auto">4×（最大）</span>
+    </div>
+    <!-- preview canvas -->
+    <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;height:160px;position:relative;background:#111;margin-bottom:16px">
+      <canvas id="scale-preview-canvas" style="position:absolute;transform-origin:0 0"></canvas>
+    </div>
+    <button class="btn-pri" onclick="confirmMapScale()">確認大小</button>
+    <button class="btn-sec" onclick="closeModal('mov-mapscale')">取消</button>
+  </div>
+</div>
+
+
 <div id="toast">
   <span id="toast-msg"></span>
   <button class="toast-undo" id="toast-undo-btn" style="display:none" onclick="toastUndo()">復原</button>
