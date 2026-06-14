@@ -954,7 +954,6 @@ function drawMarkers(){
   S.booths.forEach(b=>{
     if(b.x==null)return;
     const cx=b.x/100*W,cy=b.y/100*H;
-    const label=b.author.slice(0,4);
     const pri=b.done?'done':b.priority;
     const alpha=b.done?0.78:0.87;
     ctx.globalAlpha=alpha;
@@ -965,6 +964,8 @@ function drawMarkers(){
     ctx.fillStyle=b.done?'#fff':(MTXT[pri]||'#000');
     ctx.textAlign='center';ctx.textBaseline='middle';
     let fs=maxFS;ctx.font='bold '+fs+'px "Noto Sans JP",sans-serif';
+    const label5=b.author.slice(0,5);
+    const label=ctx.measureText(label5).width<=bW-4?label5:b.author.slice(0,4);
     while(ctx.measureText(label).width>bW-4&&fs>6){fs--;ctx.font='bold '+fs+'px "Noto Sans JP",sans-serif';}
     ctx.fillText(label,cx,cy);ctx.globalAlpha=1;
   });
@@ -1003,13 +1004,16 @@ function drawPinPrev(cX,cY){
   drawMarkers();
   const cx=pinPrevX*canvas.width,cy=pinPrevY*canvas.height;
   const bW=72,bH=36;
-  const b=S.booths.find(x=>x.id===pinId);const label=b?b.author.slice(0,4):'?';
+  const b=S.booths.find(x=>x.id===pinId);
   ctx.globalAlpha=0.92;ctx.fillStyle='#1a4a7a';
   ctx.beginPath();ctx.roundRect(cx-bW/2,cy-bH/2,bW,bH,3);ctx.fill();
   ctx.strokeStyle='rgba(255,255,255,0.9)';ctx.lineWidth=2;ctx.stroke();
   ctx.globalAlpha=1;ctx.fillStyle='#fff';
   const fs=Math.max(9,Math.round(bH*0.62));
   ctx.font='bold '+fs+'px "Noto Sans JP",sans-serif';
+  const raw=b?b.author:'?';
+  const label5p=raw.slice(0,5);
+  const label=ctx.measureText(label5p).width<=bW-4?label5p:raw.slice(0,4);
   ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,cx,cy);
 }
 
